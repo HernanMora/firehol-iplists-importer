@@ -1,0 +1,13 @@
+general:
+  repository: https://github.com/firehol/blocklist-ipsets.git
+  ignore_sets: []
+  ignore_categories: []
+
+csv:
+  comma: ' '
+  fields: ["ip", "category"]
+  outputFolder: /home/hmora
+
+elasticsearch:
+  url: http://docker1:9200
+  index: ipdatabase
