@@ -2,6 +2,7 @@ package logger
 
 import (
 	"io"
+	"os"
 
 	"github.com/sirupsen/logrus"
 )
@@ -16,20 +17,17 @@ func init() {
 	})
 }
 
-func Setup() error {
-
+func Setup(logFile string) error {
 	// Set up logging to a file if specified in the config
-	/*
-		logFile := conf.Logging.Filename
-		if logFile != "" {
-			f, err := os.OpenFile(logFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-			if err != nil {
-				return err
-			}
-			mw := io.MultiWriter(os.Stderr, f)
-			Logger.Out = mw
+	if logFile != "" {
+		f, err := os.OpenFile(logFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			return err
 		}
-	*/
+		mw := io.MultiWriter(os.Stderr, f)
+		Logger.Out = mw
+	}
+
 	return nil
 }
 

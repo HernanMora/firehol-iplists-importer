@@ -3,20 +3,18 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	configuration "github.com/HernanMora/firehol-iplists-importer/configs"
 	logger "github.com/HernanMora/firehol-iplists-importer/logger"
+	"github.com/HernanMora/firehol-iplists-importer/models"
 	IPsetService "github.com/HernanMora/firehol-iplists-importer/service"
-	CIDRUtil "github.com/HernanMora/firehol-iplists-importer/utils/net"
-	CoreDNSWorker "github.com/HernanMora/firehol-iplists-importer/worker/coredns"
-	CSVWorker "github.com/HernanMora/firehol-iplists-importer/worker/csv"
-
+	ESWorker "github.com/HernanMora/firehol-iplists-importer/worker/elasticsearch"
 	"gopkg.in/src-d/go-git.v4"
 )
 
@@ -29,61 +27,57 @@ func contains(arr []string, str string) bool {
 	return false
 }
 
-func visit(excludeSets []string, excludeCategories []string) filepath.WalkFunc {
+func visit(sets []string, skip []string, timestamp int64) filepath.WalkFunc {
 	return func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err.Error())
 		}
-		if filepath.Ext(path) != ".ipset" {
+		if (filepath.Ext(path) != ".ipset") && (filepath.Ext(path) != ".netset") {
 			return nil
 		}
+
 		filename := info.Name()
-		if contains(excludeSets, strings.TrimSuffix(filename, filepath.Ext(filename))) {
+		if !contains(sets, strings.TrimSuffix(filename, filepath.Ext(filename))) {
 			logger.Info("Set Excluded ", filename)
 			return nil
 		}
-		logger.Info("Reading file: ", path)
+
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
+			logger.Error(err.Error())
 			fmt.Println("File reading error", err)
 			return nil
 		}
 
 		var category string = IPsetService.GetCategory(string(data))
-		if contains(excludeCategories, category) {
-			logger.Info("Set Excluded ", filename, " by category ", category)
-			return nil
-		}
-
 		var maintainer string = IPsetService.GetMaintainer(string(data))
 		var version string = IPsetService.GetVersion(string(data))
 		var ipset string = IPsetService.GetIPSet(string(data))
 
-		ipsSets := IPsetService.ListIPs(string(data))
+		list := IPsetService.ListIPs(string(data))
 
-		if len(ipsSets) > 0 {
-			var rows []map[string]string
-			for _, ip := range ipsSets {
-				var ipRange []string
+		if len(list) > 0 {
+			var rows []models.Document
+			for _, ip := range list {
+				// Excluded entries
+				if contains(skip, ip) {
+					return nil
+				}
+				var values models.Document = make(models.Document, 6)
+				values["category"] = category
+				values["maintainer"] = maintainer
+				values["version"] = version
+				values["ipset"] = ipset
+				values["timestamp"] = strconv.FormatInt(timestamp, 10)
 				idx := strings.Index(ip, "/")
 				if idx > -1 {
-					ipRange, _ = CIDRUtil.Hosts(ip)
+					values["network"] = ip
 				} else {
-					ipRange = []string{ip}
-				}
-
-				for _, ip := range ipRange {
-					var values map[string]string = make(map[string]string, 4)
-					values["category"] = category
-					values["maintainer"] = maintainer
-					values["version"] = version
-					values["ipset"] = ipset
 					values["ip"] = ip
-					// Add rows in order from config
-					rows = append(rows, values)
 				}
+				rows = append(rows, values)
 			}
-			CSVWorker.Append(rows)
+			ESWorker.IndexDocuments(rows, timestamp)
 		}
 
 		return nil
@@ -107,19 +101,18 @@ func ClearDir(dir string) error {
 }
 
 func main() {
-	logger.Info("Firehol IpLists Importer")
-	t := time.Now()
-	csvFileName := fmt.Sprintf("%02d%02d%d_%02d%02d_firehol_ipsets.csv", t.Day(), t.Month(), t.Year(), t.Hour(), t.Minute())
-
 	configuration, err := configuration.Load()
 	if err != nil {
 		panic(err)
 	}
 
-	var tempDir string = "/tmp/blocklist-ipsets"
+	logger.Setup(configuration.General.Logfile)
+	logger.Info("Firehol IpLists Importer")
+	now := time.Now()
 
-	CSVWorker.Setup(csvFileName, configuration.CSVConfig)
-	CoreDNSWorker.Setup(csvFileName, configuration.CSVConfig)
+	ESWorker.Setup(configuration.ElasticConfig)
+
+	var tempDir string = "/tmp/blocklist-ipsets"
 
 	err = ClearDir(tempDir)
 	if err != nil {
@@ -135,18 +128,14 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	err = filepath.Walk(tempDir, visit(configuration.General.ExcludeSets, configuration.General.ExcludeCategories))
+	err = filepath.Walk(tempDir, visit(configuration.General.Sets, configuration.General.Skip, now.Unix()*1000))
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
-	/*
-		err = ClearDir(tempDir)
-		if err != nil {
-			logger.Error(err.Error())
-		}
-	*/
-
-	CoreDNSWorker.Group()
+	err = ClearDir(tempDir)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 
 }

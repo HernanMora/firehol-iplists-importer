@@ -21,7 +21,7 @@ func NewCSVService(csvFileName string, settings configs.CSVSettings) CSVService 
 	}
 }
 
-func (csv *CSVService) Append(lines []map[string]string) {
+func (csv *CSVService) Append(lines *[]map[string]string) {
 
 	file, err := os.OpenFile(csv.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	defer file.Close()
@@ -31,7 +31,7 @@ func (csv *CSVService) Append(lines []map[string]string) {
 	}
 	var rows [][]string
 
-	for _, line := range lines {
+	for _, line := range *lines {
 		row := []string{}
 		for _, field := range csv.settings.Fields {
 			row = append(row, line[field])
@@ -39,7 +39,6 @@ func (csv *CSVService) Append(lines []map[string]string) {
 		rows = append(rows, row)
 	}
 
-	logger.Info("Total records: ", len(rows))
 	csvWriter := encodingCSV.NewWriter(file)
 	csvWriter.Comma = []rune(csv.settings.Comma)[0]
 	err = csvWriter.WriteAll(rows)

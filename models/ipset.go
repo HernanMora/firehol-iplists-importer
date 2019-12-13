@@ -1,9 +1,11 @@
 package models
 
-// IpSet				string
-// Category   	string
-// Maintainer 	string
-// ExportedAt		string
-// Ip						string
+// IpSet
+// Category
+// Maintainer
+// Version
+// Timestamp
+// Ip
+// Network
 
-type Document map[string]interface{}
+type Document map[string]string

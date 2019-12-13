@@ -12,24 +12,27 @@ var (
 		}
 	},
 	"mappings": {
-		"ipset_record": {
+		"ipset_entry": {
 			"properties": {
 				"ip": {
 					"type": "ip"
+				},
+				"network": {
+					"type": "ip_range"
 				},
 				"category": {
 					"type": "keyword"
 				},
 				"maintainer": {
-					"type": "keyword"
+					"type": "text"
 				},
 				"ipset": {
 					"type": "keyword"
-				}
-				"version": {
-					"type": "keyword"
 				},
-				"@timestamp": {
+				"version": {
+					"type": "text"
+				},
+				"timestamp": {
 					"format": "epoch_millis||epoch_second||date_time||MMM dd YYYY HH:mm:ss z||MMM dd yyyy HH:mm:ss",
 					"type": "date"
 				}
@@ -38,5 +41,5 @@ var (
 	}
 }
 `
-	DocumentType = "ipset_record"
+	DocumentType = "ipset_entry"
 )

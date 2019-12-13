@@ -7,26 +7,20 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type CSVSettings struct {
-	Comma        string   `yaml:"comma"`
-	Fields       []string `yaml:"fields,flow"`
-	OutputFolder string   `yaml:"outputFolder"`
-}
-
 type ElasticsearchSettings struct {
 	IndexName string `yaml:"index"`
 	Url       string `yaml:"url"`
 }
 
 type GeneralSettings struct {
-	Repository        string   `yaml:"repository"`
-	ExcludeSets       []string `yaml:"ignore_sets,flow"`
-	ExcludeCategories []string `yaml:"ignore_categories,flow"`
+	Repository string   `yaml:"repository"`
+	Sets       []string `yaml:"sets,flow"`
+	Skip       []string `yaml:"skip,flow"`
+	Logfile    string   `yaml:"logfile"`
 }
 
 type Settings struct {
 	General       GeneralSettings       `yaml:"general"`
-	CSVConfig     CSVSettings           `yaml:"csv"`
 	ElasticConfig ElasticsearchSettings `yaml:"elasticsearch"`
 }
 
@@ -54,29 +48,19 @@ func setDefaults(settings *Settings) *Settings {
 		settings.General.Repository = "https://github.com/firehol/blocklist-ipsets.git"
 	}
 
-	if len(settings.General.ExcludeSets) == 0 {
-		logger.Info("General Exclude sets: Setting default value \"[]\"")
-		settings.General.ExcludeSets = []string{}
+	if len(settings.General.Sets) == 0 {
+		logger.Info("General sets: Setting default value \"[]\"")
+		settings.General.Sets = []string{}
 	}
 
-	if len(settings.General.ExcludeCategories) == 0 {
-		logger.Info("General Exclude categories: Setting default value \"[]\"")
-		settings.General.ExcludeCategories = []string{}
+	if len(settings.General.Skip) == 0 {
+		logger.Info("General Skip: Setting default value \"[]\"")
+		settings.General.Skip = []string{}
 	}
 
-	if len(settings.CSVConfig.Comma) == 0 {
-		logger.Info("CSV Comma: Setting default value \",\"")
-		settings.CSVConfig.Comma = ","
-	}
-
-	if len(settings.CSVConfig.Fields) == 0 {
-		logger.Info("CSV Fields: Setting default value \"[\"ip\", \"category\", \"ipset\", \"maintainer\", \"version\"]\"")
-		settings.CSVConfig.Fields = []string{"ip", "category", "ipset", "maintainer", "version"}
-	}
-
-	if len(settings.CSVConfig.OutputFolder) == 0 {
-		logger.Info("CSV Output Folder: Setting default value \"/tmp\"")
-		settings.CSVConfig.OutputFolder = "/tmp"
+	if len(settings.General.Logfile) == 0 {
+		logger.Info("General logfile: Setting default value \"\"")
+		settings.General.Logfile = ""
 	}
 
 	if len(settings.ElasticConfig.Url) == 0 {

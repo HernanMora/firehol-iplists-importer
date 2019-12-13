@@ -43,56 +43,40 @@ type bulkResponse struct {
 	} `json:"items"`
 }
 
-var ElasticService *ElasticsearchService
-
-func init() {
-	ElasticService = NewElasticService()
-}
-
-func NewElasticService() *ElasticsearchService {
-	return &ElasticsearchService{}
-}
-
-func (es *ElasticsearchService) SetClient(c *elasticsearch.Client) {
-	es.esClient = c
-}
-
-func (es *ElasticsearchService) SetIndexName(index string) {
-	es.indexName = index
-}
-
-func Setup(config configs.ElasticsearchSettings) {
+func NewElasticService(configuration configs.ElasticsearchSettings) ElasticsearchService {
 	logger.Info("Setting up Elasticsearch Service...")
 
 	cfg := elasticsearch.Config{
 		Addresses: []string{
-			config.Url,
+			configuration.Url,
 		},
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost:   10,
-			ResponseHeaderTimeout: 15 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
 		},
 	}
 
 	esClient, _ := elasticsearch.NewClient(cfg)
 
-	ElasticService.esClient = esClient
-	ElasticService.indexName = config.IndexName
+	return ElasticsearchService{
+		esClient:  esClient,
+		indexName: configuration.IndexName,
+	}
 }
 
-func CheckTemplate() {
+func (es *ElasticsearchService) CheckTemplate() {
 	logger.Infof("Checking template %s from elasticsearch", elasticsConf.TemplateName)
-	response, _ := ElasticService.esClient.Indices.ExistsTemplate([]string{elasticsConf.TemplateName})
+	response, _ := es.esClient.Indices.ExistsTemplate([]string{elasticsConf.TemplateName})
 	if response.IsError() && response.StatusCode != 404 {
 		logger.Errorf("Error on check index template %s from elasticsearch", elasticsConf.TemplateName)
 	} else if response.IsError() && response.StatusCode == 404 {
 		logger.Infof("Index template %s not found... Creating now", elasticsConf.TemplateName)
-		template := strings.Replace(elasticsConf.FireholTemplate, "@indexName@", ElasticService.indexName, -1)
+		template := strings.Replace(elasticsConf.FireholTemplate, "@indexName@", es.indexName, -1)
 		var buffer bytes.Buffer
 		templateBody := []byte(fmt.Sprintf("%s\n", template))
 		buffer.Grow(len(templateBody))
 		buffer.Write(templateBody)
-		response, err := ElasticService.esClient.Indices.PutTemplate(elasticsConf.TemplateName, bytes.NewReader(buffer.Bytes()))
+		response, err := es.esClient.Indices.PutTemplate(elasticsConf.TemplateName, bytes.NewReader(buffer.Bytes()))
 		if err != nil {
 			logger.Errorf("Cannot create index template %s: %s", elasticsConf.TemplateName, err)
 		}
@@ -103,105 +87,128 @@ func CheckTemplate() {
 	}
 }
 
-func removeOldDocs(index string, exportedAt time.Time) {
-	/*
-		var buffer bytes.Buffer
-		var raw map[string]interface{}
-		deleteBody := []byte(fmt.Sprintf(`{"query": { "range": { "exported_at": { "lt" : "%d" } } } }\n`, exportedAt.UnixNano()/1000000))
-		buffer.Grow(len(deleteBody))
-		buffer.Write(deleteBody)
-		response, err := ElasticService.EsClient.DeleteByQuery([]string{index}, bytes.NewReader(buffer.Bytes()))
-		if err != nil {
-			logger.Errorf("Cannot delete old rules from index %s: %s", index, err)
+func (es *ElasticsearchService) removeOldDocs(index string, timestamp int64) {
+
+	var buffer bytes.Buffer
+	var raw map[string]interface{}
+	deleteBody := []byte(fmt.Sprintf(`{"query": { "range": { "timestamp": { "lt" : "%d" } } } }\n`, timestamp))
+	buffer.Grow(len(deleteBody))
+	buffer.Write(deleteBody)
+	response, err := es.esClient.DeleteByQuery([]string{index}, bytes.NewReader(buffer.Bytes()))
+	if err != nil {
+		logger.Errorf("Cannot delete old rules from index %s: %s", index, err)
+	}
+	if response.IsError() {
+		if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
+			logger.Fatalf("Failure to to parse response body: %s", err)
+		} else {
+			logger.Errorf("Error: %v", raw)
 		}
-		if response.IsError() {
-			if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
-				log.Fatalf("Failure to to parse response body: %s", err)
-			} else {
-				logger.Errorf("Error: %v", raw)
-			}
-		}
-	*/
+	}
+
 }
 
-func InsertToElasticsearch(docs []models.Document, timestamp time.Time) {
-	response, _ := ElasticService.esClient.Indices.Exists([]string{ElasticService.indexName})
+func (es *ElasticsearchService) InsertToElasticsearch(docs []models.Document, timestamp int64) {
+	response, _ := es.esClient.Indices.Exists([]string{es.indexName})
 	if response.IsError() && response.StatusCode != 404 {
-		logger.Errorf("Error on check index %s from elasticsearch", ElasticService.indexName)
+		logger.Errorf("Error on check index %s from elasticsearch", es.indexName)
 	} else if response.IsError() && response.StatusCode == 404 {
-		logger.Infof("Index %s not found... Creating now", ElasticService.indexName)
-		response, err := ElasticService.esClient.Indices.Create(ElasticService.indexName)
+		logger.Infof("Index %s not found... Creating now", es.indexName)
+		response, err := es.esClient.Indices.Create(es.indexName)
 		if err != nil {
-			logger.Errorf("Cannot create index %s: %s", ElasticService.indexName, err)
+			logger.Errorf("Cannot create index %s: %s", es.indexName, err)
 		}
 		if response.IsError() {
-			logger.Errorf("Cannot create index %s: %s", ElasticService.indexName, response)
+			logger.Errorf("Cannot create index %s: %s", es.indexName, response)
 		}
 		time.Sleep(2 * time.Second)
 	}
 
-	ok := insertRulesBulk(ElasticService.indexName, elasticsConf.DocumentType, docs, timestamp)
-	if ok {
-		// Needed to avoid version conflicts of docs
-		time.Sleep(1 * time.Second)
-		removeOldDocs(ElasticService.indexName, timestamp)
-	}
+	//ok := es.insertRulesBulk(es.indexName, elasticsConf.DocumentType, docs)
+	es.insertRulesBulk(es.indexName, elasticsConf.DocumentType, docs)
+	/*
+		if ok {
+			// Needed to avoid version conflicts of docs
+			time.Sleep(1 * time.Second)
+			es.removeOldDocs(es.indexName, timestamp)
+		}
+	*/
 }
 
-func insertRulesBulk(index string, indexType string, docs []models.Document, exportedAt time.Time) bool {
-	var (
-		buf             bytes.Buffer
-		elasticResponse *esapi.Response
-		raw             map[string]interface{}
-		blk             *bulkResponse
-	)
-	for _, doc := range docs {
-		doc["@timestamp"] = exportedAt
-		id := fmt.Sprintf("%s-%s", doc["ipset"], doc["ip"])
-		meta := []byte(fmt.Sprintf(`{ "index" : { "_type": "%s", "_id" : "%s"} }%s`, indexType, id, "\n"))
-		bulkData, err := json.Marshal(doc)
-		if err != nil {
-			log.Fatalf("Cannot encode document %s: %s", id, err)
-		}
-		bulkData = append(bulkData, "\n"...)
-		buf.Grow(len(meta) + len(bulkData))
-		buf.Write(meta)
-		buf.Write(bulkData)
-	}
+func (es *ElasticsearchService) insertRulesBulk(index string, indexType string, docs []models.Document) bool {
 
-	elasticResponse, err := ElasticService.esClient.Bulk(bytes.NewReader(buf.Bytes()), ElasticService.esClient.Bulk.WithIndex(index))
-	if err != nil {
-		log.Fatalf("Failure indexing batch: %s", err)
-	}
-	if elasticResponse.IsError() {
-		if err := json.NewDecoder(elasticResponse.Body).Decode(&raw); err != nil {
-			log.Fatalf("Failure to to parse response body: %s", err)
+	var maxSteps = 2500
+	var step int
+	for len(docs) > 0 {
+		if len(docs) < maxSteps {
+			step = len(docs)
 		} else {
-			logger.Errorf("Error: [%d] %s: %s",
-				elasticResponse.StatusCode,
-				raw["error"].(map[string]interface{})["type"],
-				raw["error"].(map[string]interface{})["reason"],
-			)
+			step = maxSteps
 		}
-		return false
-	} else {
-		if err := json.NewDecoder(elasticResponse.Body).Decode(&blk); err != nil {
-			log.Fatalf("Failure to to parse response body: %s", err)
+		bulkDocs := docs[:step]
+
+		var (
+			buf             bytes.Buffer
+			elasticResponse *esapi.Response
+			raw             map[string]interface{}
+			blk             *bulkResponse
+		)
+
+		for _, doc := range bulkDocs {
+			var ip string
+			if value, ok := doc["network"]; ok {
+				ip = value[:strings.Index(value, "/")]
+			} else {
+				ip = doc["ip"]
+			}
+			id := fmt.Sprintf("%s_%s", doc["ipset"], ip)
+			meta := []byte(fmt.Sprintf(`{ "index" : { "_type": "%s", "_id" : "%s"} }%s`, indexType, id, "\n"))
+			bulkData, err := json.Marshal(doc)
+			if err != nil {
+				log.Fatalf("Cannot encode document %s: %s", id, err)
+			}
+			bulkData = append(bulkData, "\n"...)
+			buf.Grow(len(meta) + len(bulkData))
+			buf.Write(meta)
+			buf.Write(bulkData)
+		}
+
+		elasticResponse, err := es.esClient.Bulk(bytes.NewReader(buf.Bytes()), es.esClient.Bulk.WithIndex(index))
+		if err != nil {
+			logger.Fatalf("Failure indexing batch: %s", err)
+		}
+		if elasticResponse.IsError() {
+			if err := json.NewDecoder(elasticResponse.Body).Decode(&raw); err != nil {
+				logger.Fatalf("Failure to to parse response body: %s", err)
+			} else {
+				logger.Errorf("Error: [%d] %s: %s",
+					elasticResponse.StatusCode,
+					raw["error"].(map[string]interface{})["type"],
+					raw["error"].(map[string]interface{})["reason"],
+				)
+			}
+			return false
 		} else {
-			for _, d := range blk.Items {
-				if d.Index.Status > 201 {
-					logger.Errorf(" Error: [%d]: %s: %s: %s: %s",
-						d.Index.Status,
-						d.Index.Error.Type,
-						d.Index.Error.Reason,
-						d.Index.Error.Cause.Type,
-						d.Index.Error.Cause.Reason,
-					)
+			if err := json.NewDecoder(elasticResponse.Body).Decode(&blk); err != nil {
+				logger.Fatalf("Failure to to parse response body: %s", err)
+			} else {
+				for _, d := range blk.Items {
+					if d.Index.Status > 201 {
+						logger.Errorf(" Error: [%d]: %s: %s: %s: %s",
+							d.Index.Status,
+							d.Index.Error.Type,
+							d.Index.Error.Reason,
+							d.Index.Error.Cause.Type,
+							d.Index.Error.Cause.Reason,
+						)
+					}
 				}
 			}
 		}
+		buf.Reset()
+
+		docs = docs[step:]
 	}
-	buf.Reset()
 
 	return true
 }

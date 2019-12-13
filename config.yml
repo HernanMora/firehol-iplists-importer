@@ -1,13 +1,9 @@
 general:
   repository: https://github.com/firehol/blocklist-ipsets.git
-  ignore_sets: []
-  ignore_categories: []
-
-csv:
-  comma: ' '
-  fields: ["ip", "category"]
-  outputFolder: /home/hmora
+  sets: ["firehol_abusers_1d","firehol_abusers_30d","firehol_anonymous","firehol_level1","firehol_level2","firehol_level3","firehol_level4","firehol_proxies","firehol_webclient","firehol_webserver","alienvault_reputation","ransomware_cryptowall_ps","ransomware_feed","ransomware_locky_c2","ransomware_locky_ps","ransomware_online","ransomware_rw","ransomware_teslacrypt_ps","ransomware_torrentlocker_c2","ransomware_torrentlocker_ps","spamhaus_drop","spamhaus_edrop","tor_exits_1d","tor_exits_30d","tor_exits_7d","tor_exits"]
+  skip: []
+  logfile: "/tmp/firehol-ipsets.log"
 
 elasticsearch:
   url: http://docker1:9200
-  index: ipdatabase
+  index: firehol-ipsets
